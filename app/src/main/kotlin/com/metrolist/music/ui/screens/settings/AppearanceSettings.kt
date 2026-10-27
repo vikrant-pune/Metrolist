@@ -84,6 +84,7 @@ import com.metrolist.music.constants.PlayerBackgroundStyle
 import com.metrolist.music.constants.PlayerBackgroundStyleKey
 import com.metrolist.music.constants.PlayerButtonsStyle
 import com.metrolist.music.constants.PlayerButtonsStyleKey
+import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.constants.PureBlackMiniPlayerKey
 import com.metrolist.music.constants.RespectAgentPositioningKey
 import com.metrolist.music.constants.SelectedThemeColorKey
@@ -151,6 +152,20 @@ fun AppearanceSettings(
             EnableLandscapeScalingKey,
             defaultValue = false,
         )
+    val (pureBlack, onPureBlackChangeRaw) =
+        rememberPreference(
+            PureBlackKey,
+            defaultValue = false,
+        )
+    val (_, onPureBlackMiniPlayerChange) =
+        rememberPreference(
+            PureBlackMiniPlayerKey,
+            defaultValue = false,
+        )
+    val onPureBlackChange: (Boolean) -> Unit = { enabled ->
+        onPureBlackChangeRaw(enabled)
+        onPureBlackMiniPlayerChange(enabled)
+    }
     val (selectedThemeColorInt) =
         rememberPreference(
             SelectedThemeColorKey,
@@ -957,6 +972,30 @@ fun AppearanceSettings(
                             onClick = { onEnableLandscapeScalingChange(!enableLandscapeScaling) },
                         ),
                     )
+                    add(
+                        Material3SettingsItem(
+                            icon = painterResource(R.drawable.contrast),
+                            title = { Text(stringResource(R.string.true_amoled_black)) },
+                            description = { Text(stringResource(R.string.true_amoled_black_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = pureBlack,
+                                    onCheckedChange = onPureBlackChange,
+                                    thumbContent = {
+                                        Icon(
+                                            painter =
+                                                painterResource(
+                                                    id = if (pureBlack) R.drawable.check else R.drawable.close,
+                                                ),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(SwitchDefaults.IconSize),
+                                        )
+                                    },
+                                )
+                            },
+                            onClick = { onPureBlackChange(!pureBlack) },
+                        ),
+                    )
                     // Only show dynamic theme option when using the default/dynamic color
                     // When a custom color is selected, dynamic theme is automatically disabled
                     if (!isUsingCustomColor) {
@@ -1020,12 +1059,6 @@ fun AppearanceSettings(
         )
 
         Spacer(modifier = Modifier.height(27.dp))
-
-        val (pureBlackMiniPlayer, onPureBlackMiniPlayerChange) =
-            rememberPreference(
-                PureBlackMiniPlayerKey,
-                defaultValue = false,
-            )
 
         Material3SettingsGroup(
             title = stringResource(id = R.string.mini_player),

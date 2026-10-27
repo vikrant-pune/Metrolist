@@ -130,6 +130,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Player.STATE_ENDED
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.navigation.NavController
 import androidx.palette.graphics.Palette
 import com.metrolist.music.LocalNavController
@@ -329,6 +330,67 @@ fun BottomSheetPlayer(
     val canSkipPrevious by playerConnection.canSkipPrevious.collectAsStateWithLifecycle()
     val canSkipNext by playerConnection.canSkipNext.collectAsStateWithLifecycle()
     val isMuted by playerConnection.isMuted.collectAsStateWithLifecycle()
+    val currentFormat by playerConnection.currentFormat.collectAsStateWithLifecycle(initialValue = null)
+
+    var audioFormat by remember {
+        mutableStateOf((playerConnection.player as? ExoPlayer)?.audioFormat)
+    }
+
+    DisposableEffect(playerConnection.player) {
+        val listener =
+            object : androidx.media3.common.Player.Listener {
+                override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                    audioFormat = (playerConnection.player as? ExoPlayer)?.audioFormat
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    audioFormat = (playerConnection.player as? ExoPlayer)?.audioFormat
+                }
+            }
+        playerConnection.player.addListener(listener)
+        onDispose {
+            playerConnection.player.removeListener(listener)
+        }
+    }
+
+    val audioQualityInfo =
+        remember(audioFormat, currentFormat) {
+            val mimeType = audioFormat?.sampleMimeType ?: audioFormat?.containerMimeType ?: currentFormat?.mimeType
+            val codecs = audioFormat?.codecs ?: currentFormat?.codecs
+            val codecName =
+                when {
+                    mimeType?.contains("flac", ignoreCase = true) == true || codecs?.contains("flac", ignoreCase = true) == true -> "FLAC"
+                    mimeType?.contains("alac", ignoreCase = true) == true || codecs?.contains("alac", ignoreCase = true) == true -> "ALAC"
+                    mimeType?.contains("opus", ignoreCase = true) == true || codecs?.contains("opus", ignoreCase = true) == true -> "OPUS"
+                    mimeType?.contains("mp4a", ignoreCase = true) == true || mimeType?.contains("m4a", ignoreCase = true) == true ||
+                        codecs?.contains("mp4a", ignoreCase = true) == true || codecs?.contains("m4a", ignoreCase = true) == true -> "M4A"
+                    mimeType?.contains("aac", ignoreCase = true) == true || codecs?.contains("aac", ignoreCase = true) == true -> "AAC"
+                    mimeType?.contains("mp3", ignoreCase = true) == true || mimeType?.contains("mpeg", ignoreCase = true) == true -> "MP3"
+                    mimeType?.contains("vorbis", ignoreCase = true) == true || mimeType?.contains("ogg", ignoreCase = true) == true -> "OGG"
+                    mimeType?.contains("wav", ignoreCase = true) == true || mimeType?.contains("pcm", ignoreCase = true) == true -> "WAV"
+                    !codecs.isNullOrBlank() -> codecs.substringBefore('.').uppercase()
+                    !mimeType.isNullOrBlank() -> mimeType.substringAfter('/').substringBefore(';').substringBefore('-').uppercase()
+                    else -> null
+                }
+
+            val bitrate =
+                when {
+                    audioFormat != null && audioFormat!!.bitrate > 0 -> audioFormat!!.bitrate
+                    audioFormat != null && audioFormat!!.averageBitrate > 0 -> audioFormat!!.averageBitrate
+                    audioFormat != null && audioFormat!!.peakBitrate > 0 -> audioFormat!!.peakBitrate
+                    currentFormat != null && currentFormat!!.bitrate > 0 -> currentFormat!!.bitrate
+                    else -> null
+                }
+
+            val bitrateText = bitrate?.let { "${it / 1000} kbps" }
+
+            when {
+                codecName != null && bitrateText != null -> "$codecName • $bitrateText"
+                codecName != null -> codecName
+                bitrateText != null -> bitrateText
+                else -> null
+            }
+        }
 
     val sliderStyle by rememberEnumPreference(SliderStyleKey, SliderStyle.DEFAULT)
     val squigglySlider by rememberPreference(SquigglySliderKey, defaultValue = false)
@@ -1184,6 +1246,17 @@ fun BottomSheetPlayer(
                                 )
                             }
                         }
+                    }
+
+                    if (!audioQualityInfo.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = audioQualityInfo,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextBackgroundColor.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
 

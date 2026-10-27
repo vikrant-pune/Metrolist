@@ -88,8 +88,8 @@ internal fun Palette.rankedColors(
 
 fun ColorScheme.pureBlack(apply: Boolean) =
     if (apply) copy(
-        surface = Color.Black,
-        background = Color.Black
+        surface = Color(0xFF000000),
+        background = Color(0xFF000000)
     ) else this
 
 val ColorSaver = object : Saver<Color, Int> {
