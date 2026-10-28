@@ -7,13 +7,17 @@ package com.metrolist.music.playback
 
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.annotation.DrawableRes
+import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaConstants.EXTRAS_KEY_IS_EXPLICIT
@@ -35,9 +39,12 @@ import com.metrolist.innertube.models.filterExplicit
 import com.metrolist.innertube.models.filterVideoSongs
 import com.metrolist.music.R
 import com.metrolist.music.constants.AndroidAutoSearchLocalLimitKey
+import com.metrolist.music.constants.AutoDetectPodcastModeKey
 import com.metrolist.music.constants.HideExplicitKey
 import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.MediaSessionConstants
+import com.metrolist.music.constants.PodcastDurationThresholdKey
+import com.metrolist.music.constants.PodcastModeKey
 import com.metrolist.music.constants.SongSortType
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.PlaylistEntity
@@ -89,6 +96,99 @@ constructor(
 
     fun release() {
         scope.cancel()
+    }
+
+    private fun shouldUsePodcastSeek(player: Player?): Boolean {
+        if (player == null) return false
+        val autoDetect = context.dataStore.get(AutoDetectPodcastModeKey, false)
+        return if (autoDetect) {
+            val thresholdMinutes = context.dataStore.get(PodcastDurationThresholdKey, 20)
+            val thresholdMs = thresholdMinutes * 60 * 1000L
+            val duration = player.duration
+            duration != C.TIME_UNSET && duration > thresholdMs
+        } else {
+            context.dataStore.get(PodcastModeKey, false)
+        }
+    }
+
+    fun onSkipToNext(session: MediaSession? = null) {
+        val player = session?.player ?: if (::service.isInitialized) service.player else return
+        if (shouldUsePodcastSeek(player)) {
+            val currentPosition = player.currentPosition
+            val duration = player.duration
+            val targetPosition = (currentPosition + 30000).coerceAtMost(if (duration != C.TIME_UNSET) duration else Long.MAX_VALUE)
+            player.seekTo(targetPosition)
+        } else {
+            player.seekToNext()
+        }
+    }
+
+    fun onSkipToPrevious(session: MediaSession? = null) {
+        val player = session?.player ?: if (::service.isInitialized) service.player else return
+        if (shouldUsePodcastSeek(player)) {
+            val currentPosition = player.currentPosition
+            val targetPosition = (currentPosition - 15000).coerceAtLeast(0)
+            player.seekTo(targetPosition)
+        } else {
+            player.seekToPrevious()
+        }
+    }
+
+    override fun onMediaButtonEvent(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        intent: Intent,
+    ): Boolean {
+        if (shouldUsePodcastSeek(session.player)) {
+            val keyEvent = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                ?: @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+            if (keyEvent != null) {
+                when (keyEvent.keyCode) {
+                    KeyEvent.KEYCODE_MEDIA_NEXT,
+                    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                    KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD -> {
+                        if (keyEvent.action == KeyEvent.ACTION_DOWN) {
+                            onSkipToNext(session)
+                        }
+                        return true
+                    }
+
+                    KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                    KeyEvent.KEYCODE_MEDIA_REWIND,
+                    KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD -> {
+                        if (keyEvent.action == KeyEvent.ACTION_DOWN) {
+                            onSkipToPrevious(session)
+                        }
+                        return true
+                    }
+                }
+            }
+        }
+        return super.onMediaButtonEvent(session, controller, intent)
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+    override fun onPlayerCommandRequest(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        playerCommand: @Player.Command Int,
+    ): Int {
+        if (shouldUsePodcastSeek(session.player)) {
+            when (playerCommand) {
+                Player.COMMAND_SEEK_TO_NEXT,
+                Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
+                    onSkipToNext(session)
+                    return SessionResult.RESULT_INFO_SKIPPED
+                }
+
+                Player.COMMAND_SEEK_TO_PREVIOUS,
+                Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
+                    onSkipToPrevious(session)
+                    return SessionResult.RESULT_INFO_SKIPPED
+                }
+            }
+        }
+        return super.onPlayerCommandRequest(session, controller, playerCommand)
     }
 
     override fun onConnect(

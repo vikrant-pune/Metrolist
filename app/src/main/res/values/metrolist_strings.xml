@@ -754,6 +754,12 @@
     <string name="enable_landscape_scaling_desc">Scale UI in landscape mode for larger screens</string>
     <string name="true_amoled_black">True AMOLED Black</string>
     <string name="true_amoled_black_desc">Use pure black background in dark mode</string>
+    <string name="podcast_mode">Podcast Mode: Convert Next/Prev to Seek</string>
+    <string name="podcast_mode_desc">Skip forward 30 seconds and rewind 15 seconds instead of skipping tracks</string>
+    <string name="auto_detect_podcast_mode">Auto-Detect Podcast Mode</string>
+    <string name="auto_detect_podcast_mode_desc">Automatically use seek controls for tracks longer than duration threshold</string>
+    <string name="podcast_duration_threshold">Duration Threshold</string>
+    <string name="podcast_duration_threshold_desc">%d minutes</string>
 
     <!-- Music Recognition -->
     <string name="recognize_music">Recognize music</string>

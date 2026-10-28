@@ -80,10 +80,13 @@ import com.metrolist.music.constants.LyricsTextPositionKey
 import com.metrolist.music.constants.LyricsTextSizeKey
 import com.metrolist.music.constants.MiniPlayerBackgroundStyle
 import com.metrolist.music.constants.MiniPlayerBackgroundStyleKey
+import com.metrolist.music.constants.AutoDetectPodcastModeKey
 import com.metrolist.music.constants.PlayerBackgroundStyle
 import com.metrolist.music.constants.PlayerBackgroundStyleKey
 import com.metrolist.music.constants.PlayerButtonsStyle
 import com.metrolist.music.constants.PlayerButtonsStyleKey
+import com.metrolist.music.constants.PodcastDurationThresholdKey
+import com.metrolist.music.constants.PodcastModeKey
 import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.constants.PureBlackMiniPlayerKey
 import com.metrolist.music.constants.RespectAgentPositioningKey
@@ -178,6 +181,21 @@ fun AppearanceSettings(
         rememberPreference(
             UseNewPlayerDesignKey,
             defaultValue = true,
+        )
+    val (podcastMode, onPodcastModeChange) =
+        rememberPreference(
+            PodcastModeKey,
+            defaultValue = false,
+        )
+    val (autoDetectPodcastMode, onAutoDetectPodcastModeChange) =
+        rememberPreference(
+            AutoDetectPodcastModeKey,
+            defaultValue = false,
+        )
+    val (podcastDurationThreshold, onPodcastDurationThresholdChange) =
+        rememberPreference(
+            PodcastDurationThresholdKey,
+            defaultValue = 20,
         )
     val (miniPlayerBackground, onMiniPlayerBackgroundChange) =
         rememberEnumPreference(
@@ -1157,6 +1175,77 @@ fun AppearanceSettings(
                             )
                         },
                         onClick = { onUseNewPlayerDesignChange(!useNewPlayerDesign) },
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.fast_forward),
+                        title = { Text(stringResource(R.string.podcast_mode)) },
+                        description = { Text(stringResource(R.string.podcast_mode_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = podcastMode,
+                                onCheckedChange = onPodcastModeChange,
+                                enabled = !autoDetectPodcastMode,
+                                thumbContent = {
+                                    Icon(
+                                        painter =
+                                            painterResource(
+                                                id = if (podcastMode) R.drawable.check else R.drawable.close,
+                                            ),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(SwitchDefaults.IconSize),
+                                    )
+                                },
+                            )
+                        },
+                        enabled = !autoDetectPodcastMode,
+                        onClick = {
+                            if (!autoDetectPodcastMode) {
+                                onPodcastModeChange(!podcastMode)
+                            }
+                        },
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.time_auto),
+                        title = { Text(stringResource(R.string.auto_detect_podcast_mode)) },
+                        description = { Text(stringResource(R.string.auto_detect_podcast_mode_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = autoDetectPodcastMode,
+                                onCheckedChange = onAutoDetectPodcastModeChange,
+                                thumbContent = {
+                                    Icon(
+                                        painter =
+                                            painterResource(
+                                                id = if (autoDetectPodcastMode) R.drawable.check else R.drawable.close,
+                                            ),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(SwitchDefaults.IconSize),
+                                    )
+                                },
+                            )
+                        },
+                        onClick = { onAutoDetectPodcastModeChange(!autoDetectPodcastMode) },
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.timer),
+                        title = { Text(stringResource(R.string.podcast_duration_threshold)) },
+                        description = {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = stringResource(R.string.podcast_duration_threshold_desc, podcastDurationThreshold),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Slider(
+                                    value = podcastDurationThreshold.toFloat(),
+                                    onValueChange = { onPodcastDurationThresholdChange(it.roundToInt()) },
+                                    valueRange = 5f..120f,
+                                    enabled = autoDetectPodcastMode,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        },
+                        enabled = autoDetectPodcastMode,
                     ),
                     Material3SettingsItem(
                         icon = painterResource(R.drawable.gradient),

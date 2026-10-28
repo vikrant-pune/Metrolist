@@ -4443,12 +4443,12 @@ class MusicService :
             }
 
             MusicWidgetReceiver.ACTION_NEXT -> {
-                player.seekToNext()
+                mediaLibrarySessionCallback.onSkipToNext()
                 updateWidgetUI(player.isPlaying)
             }
 
             MusicWidgetReceiver.ACTION_PREVIOUS -> {
-                player.seekToPrevious()
+                mediaLibrarySessionCallback.onSkipToPrevious()
                 updateWidgetUI(player.isPlaying)
             }
 
