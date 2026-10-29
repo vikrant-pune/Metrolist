@@ -1,5 +1,6 @@
 package com.metrolist.music.ui.screens.podcast
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -31,6 +32,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -106,6 +108,7 @@ fun OnlinePodcastScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val libraryPodcast by viewModel.libraryPodcast.collectAsStateWithLifecycle()
+    val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
 
     val lazyListState = rememberLazyListState()
 
@@ -189,8 +192,11 @@ fun OnlinePodcastScreen(
                         items = filteredEpisodes,
                         key = { _, episode -> episode.id }
                     ) { index, episode ->
+                        Log.d("MetricsDebug", "Metrics for ${episode.id}: ${downloadProgress[episode.id]}")
+                        val metrics = downloadProgress[episode.id]
                         YouTubeListItem(
                             item = episode,
+                            downloadMetrics = metrics,
                             isActive = mediaMetadata?.id == episode.id,
                             isPlaying = isPlaying,
                             modifier = Modifier

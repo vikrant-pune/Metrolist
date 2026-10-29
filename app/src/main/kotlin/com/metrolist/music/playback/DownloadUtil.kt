@@ -7,6 +7,7 @@ package com.metrolist.music.playback
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.util.Log
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
 import androidx.media3.database.DatabaseProvider
@@ -43,13 +44,18 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
@@ -58,14 +64,26 @@ import okhttp3.OkHttpClient
 import timber.log.Timber
 import java.io.IOException
 import java.time.LocalDateTime
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class DownloadMetrics(
+    val progress: Float,
+    val speedText: String,
+    val etaText: String,
+)
+
+private data class ProgressSnapshot(
+    val bytesDownloaded: Long,
+    val timestampMs: Long,
+    val speedBytesPerSec: Double = 0.0,
+)
+
 @Singleton
-class DownloadUtil
-@Inject
-constructor(
+class DownloadUtil(
     @ApplicationContext private val context: Context,
     val database: MusicDatabase,
     val databaseProvider: DatabaseProvider,
@@ -92,6 +110,9 @@ constructor(
     private val downloadPreparations = Semaphore(3)
 
     val downloads = MutableStateFlow<Map<String, Download>>(emptyMap())
+    val downloadProgress = MutableStateFlow<Map<String, DownloadMetrics>>(emptyMap())
+    val downloadMetrics: StateFlow<Map<String, DownloadMetrics>> = downloadProgress.asStateFlow()
+    private val progressSnapshots = ConcurrentHashMap<String, ProgressSnapshot>()
 
     private val dataSourceFactory =
         ResolvingDataSource.Factory(
@@ -260,6 +281,25 @@ constructor(
                             }
                         }
 
+                        if (download.state == Download.STATE_DOWNLOADING) {
+                            val metrics = calculateDownloadMetrics(download)
+                            downloadProgress.update { current ->
+                                current.toMutableMap().apply {
+                                    updateProgressForDownload(this, download, metrics)
+                                    val activeMetrics = this
+                                    Log.d("MetricsDebug", "Engine emitting: $activeMetrics")
+                                }
+                            }
+                            startProgressPolling()
+                        } else {
+                            downloadProgress.update { current ->
+                                current.toMutableMap().apply {
+                                    removeProgressForDownload(this, download)
+                                }
+                            }
+                            checkStopProgressPolling()
+                        }
+
                         scope.launch {
                             when (download.state) {
                                 Download.STATE_COMPLETED -> {
@@ -284,6 +324,13 @@ constructor(
                         val downloadId = download.request.id
                         songUrlCache.invalidate(downloadId)
 
+                        downloadProgress.update { current ->
+                            current.toMutableMap().apply {
+                                removeProgressForDownload(this, download)
+                            }
+                        }
+                        checkStopProgressPolling()
+
                         runCatching {
                             database.updateDownloadedInfo(downloadId, false, null)
                         }.onSuccess {
@@ -301,14 +348,161 @@ constructor(
             )
         }
 
+    private var progressPollJob: Job? = null
+
+    private fun updateProgressForDownload(
+        map: MutableMap<String, DownloadMetrics>,
+        download: Download,
+        metrics: DownloadMetrics,
+    ) {
+        val id = download.request.id
+        map[id] = metrics
+        download.request.customCacheKey?.takeIf { it.isNotBlank() }?.let {
+            map[it] = metrics
+            val bridgedKey = mapDownloadIdToEpisodeId(it)
+            if (bridgedKey.isNotBlank()) map[bridgedKey] = metrics
+        }
+        val uriStr = download.request.uri.toString()
+        if (uriStr.isNotBlank()) {
+            map[uriStr] = metrics
+            val bridgedUri = mapDownloadIdToEpisodeId(uriStr)
+            if (bridgedUri.isNotBlank()) map[bridgedUri] = metrics
+        }
+        val bridged = mapDownloadIdToEpisodeId(id)
+        if (bridged.isNotBlank()) map[bridged] = metrics
+    }
+
+    private fun removeProgressForDownload(
+        map: MutableMap<String, DownloadMetrics>,
+        download: Download,
+    ) {
+        val id = download.request.id
+        map.remove(id)
+        progressSnapshots.remove(id)
+        download.request.customCacheKey?.let {
+            map.remove(it)
+            val bridgedKey = mapDownloadIdToEpisodeId(it)
+            if (bridgedKey.isNotBlank()) map.remove(bridgedKey)
+        }
+        val uriStr = download.request.uri.toString()
+        map.remove(uriStr)
+        val bridgedUri = mapDownloadIdToEpisodeId(uriStr)
+        if (bridgedUri.isNotBlank()) map.remove(bridgedUri)
+        val bridged = mapDownloadIdToEpisodeId(id)
+        if (bridged.isNotBlank()) map.remove(bridged)
+    }
+
+    fun mapDownloadIdToEpisodeId(
+        downloadId: String,
+        candidateEpisodeIds: Collection<String> = emptyList(),
+    ): String = resolveDownloadIdToEpisodeId(downloadId, candidateEpisodeIds)
+
+    fun calculateProgressPercentage(download: Download): Float =
+        com.metrolist.music.playback.calculateProgressPercentage(download)
+
+    fun calculateDownloadMetrics(download: Download): DownloadMetrics {
+        val progress = calculateProgressPercentage(download)
+        val fraction = (progress / 100f).coerceIn(0f, 1f)
+        val id = download.request.id
+        val currentBytes = download.bytesDownloaded
+        val contentLength = download.contentLength
+        val now = System.currentTimeMillis()
+
+        val prevSnapshot = progressSnapshots[id]
+        val speedBytesPerSec = if (prevSnapshot != null && now > prevSnapshot.timestampMs) {
+            val deltaBytes = (currentBytes - prevSnapshot.bytesDownloaded).coerceAtLeast(0L)
+            val deltaTimeSeconds = (now - prevSnapshot.timestampMs) / 1000.0
+            if (deltaTimeSeconds > 0.0) deltaBytes / deltaTimeSeconds else 0.0
+        } else {
+            0.0
+        }
+
+        progressSnapshots[id] = ProgressSnapshot(currentBytes, now, speedBytesPerSec)
+
+        val speedText = formatDownloadSpeed(speedBytesPerSec)
+        val remainingBytes = if (contentLength > 0L) (contentLength - currentBytes).coerceAtLeast(0L) else -1L
+        val etaText = formatDownloadEta(remainingBytes, speedBytesPerSec)
+
+        return DownloadMetrics(
+            progress = fraction,
+            speedText = speedText,
+            etaText = etaText,
+        )
+    }
+
+    private fun startProgressPolling() {
+        if (progressPollJob?.isActive == true) return
+        progressPollJob = scope.launch {
+            while (isActive) {
+                val currentDownloads = downloadManager.currentDownloads
+                val activeDownloads = currentDownloads.filter { it.state == Download.STATE_DOWNLOADING }
+                if (activeDownloads.isEmpty()) {
+                    break
+                }
+                downloadProgress.update { currentMap ->
+                    val updated = currentMap.toMutableMap()
+                    for (download in activeDownloads) {
+                        val metrics = calculateDownloadMetrics(download)
+                        updateProgressForDownload(updated, download, metrics)
+                    }
+                    val activeMetrics = updated
+                    Log.d("MetricsDebug", "Engine emitting: $activeMetrics")
+                    updated
+                }
+                downloads.update { currentMap ->
+                    val updated = currentMap.toMutableMap()
+                    for (download in activeDownloads) {
+                        updated[download.request.id] = download
+                    }
+                    updated
+                }
+                delay(500)
+            }
+            progressPollJob = null
+        }
+    }
+
+    private fun checkStopProgressPolling() {
+        if (downloadManager.currentDownloads.none { it.state == Download.STATE_DOWNLOADING }) {
+            progressPollJob?.cancel()
+            progressPollJob = null
+        }
+    }
+
+    fun updateDownloadsProgress(downloadsList: List<Download>) {
+        val active = downloadsList.filter { it.state == Download.STATE_DOWNLOADING }
+        if (active.isNotEmpty()) {
+            downloadProgress.update { current ->
+                val updated = current.toMutableMap()
+                for (d in active) {
+                    val metrics = calculateDownloadMetrics(d)
+                    updateProgressForDownload(updated, d, metrics)
+                }
+                val activeMetrics = updated
+                Log.d("MetricsDebug", "Engine emitting: $activeMetrics")
+                updated
+            }
+        }
+    }
+
     init {
         val result = mutableMapOf<String, Download>()
+        val initialProgress = mutableMapOf<String, DownloadMetrics>()
         downloadManager.downloadIndex.getDownloads().use { cursor ->
             while (cursor.moveToNext()) {
-                result[cursor.download.request.id] = cursor.download
+                val download = cursor.download
+                result[download.request.id] = download
+                if (download.state == Download.STATE_DOWNLOADING) {
+                    val metrics = calculateDownloadMetrics(download)
+                    updateProgressForDownload(initialProgress, download, metrics)
+                }
             }
         }
         downloads.value = result
+        downloadProgress.value = initialProgress
+        if (initialProgress.isNotEmpty()) {
+            startProgressPolling()
+        }
         scope.launch {
             result.values
                 .filter { it.state == Download.STATE_COMPLETED }
@@ -317,6 +511,10 @@ constructor(
     }
 
     fun getDownload(songId: String): Flow<Download?> = downloads.map { it[songId] }
+
+    fun getDownloadProgress(songId: String): Flow<Float?> = downloadProgress.map { it[songId]?.progress }
+
+    fun getDownloadMetrics(songId: String): Flow<DownloadMetrics?> = downloadProgress.map { it[songId] }
 
     fun download(song: Song) = download(song.toMediaMetadata())
 
@@ -397,6 +595,7 @@ constructor(
     }
 
     fun release() {
+        progressPollJob?.cancel()
         scope.cancel()
     }
 
@@ -420,6 +619,28 @@ constructor(
 }
 
 internal fun shouldPrepareDownload(downloadState: Int?): Boolean = downloadState != Download.STATE_COMPLETED
+
+internal fun calculateDownloadProgressPercentage(
+    bytesDownloaded: Long,
+    contentLength: Long,
+    percentDownloaded: Float = -1f,
+): Float {
+    return if (contentLength > 0L) {
+        ((bytesDownloaded.toFloat() / contentLength) * 100f).coerceIn(0f, 100f)
+    } else if (percentDownloaded >= 0f) {
+        percentDownloaded.coerceIn(0f, 100f)
+    } else {
+        0f
+    }
+}
+
+internal fun calculateProgressPercentage(download: Download): Float {
+    return calculateDownloadProgressPercentage(
+        bytesDownloaded = download.bytesDownloaded,
+        contentLength = download.contentLength,
+        percentDownloaded = download.percentDownloaded,
+    )
+}
 
 internal fun downloadArtworkUrls(
     songArtwork: String?,
@@ -451,3 +672,62 @@ internal fun downloadContentLength(
 
 private val PARTIAL_CONTENT_RANGE = Regex("""bytes\s+0-0/(\d+)""", RegexOption.IGNORE_CASE)
 private val UNSATISFIED_CONTENT_RANGE = Regex("""bytes\s+\*/(\d+)""", RegexOption.IGNORE_CASE)
+
+internal fun resolveDownloadIdToEpisodeId(
+    downloadId: String,
+    candidateEpisodeIds: Collection<String> = emptyList(),
+): String {
+    if (downloadId.isBlank()) return ""
+
+    if (candidateEpisodeIds.contains(downloadId)) {
+        return downloadId
+    }
+
+    for (candidate in candidateEpisodeIds) {
+        if (candidate.isNotBlank() && downloadId.contains(candidate)) {
+            return candidate
+        }
+    }
+
+    val vParamMatch = Regex("""[?&]v=([a-zA-Z0-9_-]+)""").find(downloadId)
+    if (vParamMatch != null) {
+        val extracted = vParamMatch.groupValues[1]
+        if (extracted.isNotBlank()) return extracted
+    }
+
+    val shortUrlMatch = Regex("""(?:youtu\.be/|/(?:v|embed|shorts)/)([a-zA-Z0-9_-]+)""").find(downloadId)
+    if (shortUrlMatch != null) {
+        val extracted = shortUrlMatch.groupValues[1]
+        if (extracted.isNotBlank()) return extracted
+    }
+
+    val cleaned = downloadId.substringBefore("?").substringBefore("#")
+    val lastSegment = cleaned.substringAfterLast("/").substringAfterLast(":")
+    if (lastSegment.isNotBlank()) {
+        return lastSegment
+    }
+
+    return downloadId
+}
+
+internal fun mapDownloadIdToEpisodeId(
+    downloadId: String,
+    candidateEpisodeIds: Collection<String> = emptyList(),
+): String = resolveDownloadIdToEpisodeId(downloadId, candidateEpisodeIds)
+
+internal fun formatDownloadSpeed(bytesPerSecond: Double): String {
+    val mbps = bytesPerSecond / (1024.0 * 1024.0)
+    return String.format(Locale.US, "%.1f MB/s", mbps)
+}
+
+internal fun formatDownloadEta(remainingBytes: Long, bytesPerSecond: Double): String {
+    if (remainingBytes == 0L) return "ETA: 0s"
+    if (remainingBytes < 0L || bytesPerSecond <= 0.0) return "ETA: --"
+    val etaSeconds = (remainingBytes / bytesPerSecond).toLong()
+    val formatted = when {
+        etaSeconds < 60 -> "${etaSeconds}s"
+        etaSeconds < 3600 -> "${etaSeconds / 60}m ${etaSeconds % 60}s"
+        else -> "${etaSeconds / 3600}h ${(etaSeconds % 3600) / 60}m"
+    }
+    return "ETA: $formatted"
+}

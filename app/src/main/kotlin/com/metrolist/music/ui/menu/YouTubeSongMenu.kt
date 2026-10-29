@@ -600,9 +600,9 @@ fun YouTubeSongMenu(
                             Material3MenuItemData(
                                 title = { Text(text = stringResource(R.string.downloading)) },
                                 icon = {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        strokeWidth = 2.dp
+                                    Icon(
+                                        painter = painterResource(R.drawable.download),
+                                        contentDescription = null
                                     )
                                 },
                                 onClick = {

@@ -7,6 +7,7 @@
 
 package com.metrolist.music.ui.component
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
@@ -33,15 +34,16 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -119,6 +121,7 @@ import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.MediaMetadata
+import com.metrolist.music.playback.DownloadMetrics
 import com.metrolist.music.playback.queues.LocalAlbumRadio
 import com.metrolist.music.ui.utils.resize
 import com.metrolist.music.utils.joinByBullet
@@ -258,12 +261,18 @@ inline fun ListItem(
     isSelected: Boolean? = false,
     isActive: Boolean = false,
     isAvailable: Boolean = true,
+    downloadProgress: Float? = null,
+    downloadMetrics: DownloadMetrics? = null,
 ) {
+    val activeMetrics = downloadMetrics ?: downloadProgress?.let {
+        DownloadMetrics(progress = it, speedText = "", etaText = "")
+    }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = if (isActive) {
             modifier // playing highlight
-                .height(ListItemHeight)
+                .heightIn(min = ListItemHeight)
                 .padding(horizontal = 8.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(
@@ -273,13 +282,13 @@ inline fun ListItem(
                 )
         } else if (isSelected == true) {
             modifier // inactive selected
-                .height(ListItemHeight)
+                .heightIn(min = ListItemHeight)
                 .padding(horizontal = 8.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(color = MaterialTheme.colorScheme.inversePrimary.copy(alpha = 0.4f))
         } else {
             modifier // default
-                .height(ListItemHeight)
+                .heightIn(min = ListItemHeight)
                 .padding(horizontal = 8.dp)
         }
     ) {
@@ -328,6 +337,36 @@ inline fun ListItem(
                     subtitle()
                 }
             }
+
+            if (activeMetrics != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                val fraction = if (activeMetrics.progress > 1f) {
+                    (activeMetrics.progress / 100f).coerceIn(0f, 1f)
+                } else {
+                    activeMetrics.progress.coerceIn(0f, 1f)
+                }
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(1.5.dp)),
+                )
+                val infoText = buildList {
+                    if (activeMetrics.speedText.isNotBlank()) add(activeMetrics.speedText)
+                    if (activeMetrics.etaText.isNotBlank()) add(activeMetrics.etaText)
+                }.joinToString(" • ")
+                if (infoText.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = infoText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
 
         trailingContent()
@@ -344,6 +383,8 @@ fun ListItem(
     trailingContent: @Composable RowScope.() -> Unit = {},
     isSelected: Boolean? = false,
     isActive: Boolean = false,
+    downloadProgress: Float? = null,
+    downloadMetrics: DownloadMetrics? = null,
 ) = ListItem(
     title = title,
     subtitle = {
@@ -362,7 +403,9 @@ fun ListItem(
     trailingContent = trailingContent,
     modifier = modifier,
     isSelected = isSelected,
-    isActive = isActive
+    isActive = isActive,
+    downloadProgress = downloadProgress,
+    downloadMetrics = downloadMetrics,
 )
 
 @Composable
@@ -375,6 +418,8 @@ fun ListItem(
     trailingContent: @Composable RowScope.() -> Unit = {},
     isSelected: Boolean? = false,
     isActive: Boolean = false,
+    downloadProgress: Float? = null,
+    downloadMetrics: DownloadMetrics? = null,
 ) = ListItem(
     title = title,
     subtitle = {
@@ -394,7 +439,9 @@ fun ListItem(
     trailingContent = trailingContent,
     modifier = modifier,
     isSelected = isSelected,
-    isActive = isActive
+    isActive = isActive,
+    downloadProgress = downloadProgress,
+    downloadMetrics = downloadMetrics,
 )
 
 @Composable
@@ -508,8 +555,16 @@ fun SongListItem(
     isActive: Boolean = false,
     isPlaying: Boolean = false,
     isSwipeable: Boolean = true,
+    downloadProgress: Float? = null,
+    downloadMetrics: DownloadMetrics? = null,
     trailingContent: @Composable RowScope.() -> Unit = {},
 ) {
+    val activeProgressMap by LocalDownloadUtil.current.downloadProgress.collectAsStateWithLifecycle()
+    val effectiveMetrics = downloadMetrics
+        ?: activeProgressMap[song.id]
+        ?: downloadProgress?.let { DownloadMetrics(progress = it, speedText = "", etaText = "") }
+    val effectiveProgress = downloadProgress ?: effectiveMetrics?.progress
+
     val artistNameAliases = LocalArtistNameAliases.current
     val swipeEnabled by rememberPreference(SwipeToSongKey, defaultValue = false)
 
@@ -558,7 +613,9 @@ fun SongListItem(
              trailingContent = trailingContent,
              modifier = modifier,
              isSelected = isSelected,
-             isActive = isActive
+             isActive = isActive,
+             downloadProgress = effectiveProgress,
+             downloadMetrics = effectiveMetrics,
          )
      }
 
@@ -1126,6 +1183,8 @@ fun YouTubeListItem(
     isActive: Boolean = false,
     isPlaying: Boolean = false,
     isSwipeable: Boolean = true,
+    downloadProgress: Float? = null,
+    downloadMetrics: DownloadMetrics? = null,
     trailingContent: @Composable RowScope.() -> Unit = {},
     badges: @Composable RowScope.() -> Unit = {
         val database = LocalDatabase.current
@@ -1145,12 +1204,20 @@ fun YouTubeListItem(
         // if (item is SongItem && song?.song?.inLibrary != null) {
         //     Icon.Library()
         // }
-        if (item is SongItem) {
+        if (item is SongItem || item is EpisodeItem) {
             val download by LocalDownloadUtil.current.getDownload(item.id).collectAsStateWithLifecycle(null)
             Icon.Download(download?.state)
         }
     },
 ) {
+    val activeProgressMap by LocalDownloadUtil.current.downloadProgress.collectAsStateWithLifecycle()
+    val effectiveMetrics = downloadMetrics
+        ?: activeProgressMap[item.id]
+        ?: downloadProgress?.let { DownloadMetrics(progress = it, speedText = "", etaText = "") }
+    val effectiveProgress = downloadProgress ?: effectiveMetrics?.progress
+
+    Log.d("MetricsDebug", "Drawing YouTubeListItem for ID: ${item.id} | Metrics: $downloadProgress")
+
     val swipeEnabled by rememberPreference(SwipeToSongKey, defaultValue = false)
     val artistNameAliases = LocalArtistNameAliases.current
     val artistSeparator = " ${stringResource(R.string.and)} "
@@ -1213,7 +1280,9 @@ fun YouTubeListItem(
             },
             trailingContent = trailingContent,
             modifier = modifier,
-            isActive = isActive
+            isActive = isActive,
+            downloadProgress = effectiveProgress,
+            downloadMetrics = effectiveMetrics,
         )
     }
 
@@ -1953,12 +2022,6 @@ object Icon {
                 contentDescription = null,
                 modifier = Modifier
                     .size(18.dp)
-                    .padding(end = 2.dp)
-            )
-            STATE_QUEUED, STATE_DOWNLOADING -> CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                modifier = Modifier
-                    .size(16.dp)
                     .padding(end = 2.dp)
             )
             else -> { /* no icon */ }

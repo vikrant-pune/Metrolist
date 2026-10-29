@@ -47,6 +47,7 @@ import com.metrolist.music.extensions.filterYoutubeShorts
 import com.metrolist.music.extensions.matchesNormalizedQuery
 import com.metrolist.music.extensions.normalizeForSearch
 import com.metrolist.music.extensions.toEnum
+import com.metrolist.music.playback.DownloadMetrics
 import com.metrolist.music.playback.DownloadUtil
 import com.metrolist.music.utils.PodcastRefreshTrigger
 import com.metrolist.music.utils.SyncUtils
@@ -456,7 +457,15 @@ constructor(
     @ApplicationContext context: Context,
     private val database: MusicDatabase,
     private val syncUtils: SyncUtils,
+    val downloadUtil: DownloadUtil,
 ) : ViewModel() {
+    val downloadProgress: StateFlow<Map<String, DownloadMetrics>> = downloadUtil.downloadProgress
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val currentDownloadProgress: StateFlow<Float> = downloadProgress
+        .map { it.values.firstOrNull()?.progress ?: 0f }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
     // Subscribed podcast channels synced from YT Music
     val subscribedChannels = database.subscribedPodcasts()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())

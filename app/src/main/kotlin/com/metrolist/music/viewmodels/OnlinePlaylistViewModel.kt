@@ -15,6 +15,8 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.filterVideoSongs
 import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.db.MusicDatabase
+import com.metrolist.music.playback.DownloadMetrics
+import com.metrolist.music.playback.DownloadUtil
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import com.metrolist.music.utils.reportException
@@ -24,8 +26,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -38,8 +42,16 @@ import javax.inject.Inject
 class OnlinePlaylistViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     savedStateHandle: SavedStateHandle,
-    private val database: MusicDatabase
+    private val database: MusicDatabase,
+    val downloadUtil: DownloadUtil,
 ) : ViewModel() {
+    val downloadProgress: StateFlow<Map<String, DownloadMetrics>> = downloadUtil.downloadProgress
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val currentDownloadProgress: StateFlow<Float> = downloadProgress
+        .map { it.values.firstOrNull()?.progress ?: 0f }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
     private val playlistId = savedStateHandle.get<String>("playlistId")!!
 
     // Check if this is a special podcast playlist (with or without VL prefix)

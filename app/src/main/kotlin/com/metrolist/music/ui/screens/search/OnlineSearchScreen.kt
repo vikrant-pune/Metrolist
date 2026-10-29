@@ -62,6 +62,7 @@ import com.metrolist.innertube.models.PodcastItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalPlayerConnection
+import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.R
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.constants.SuggestionItemHeight
@@ -103,6 +104,7 @@ fun OnlineSearchScreen(
     val haptic = LocalHapticFeedback.current
     val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
     val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
+    val downloadProgress by LocalDownloadUtil.current.downloadProgress.collectAsStateWithLifecycle()
     val viewState by viewModel.viewState.collectAsStateWithLifecycle()
 
     val lazyListState = rememberLazyListState()
@@ -153,6 +155,7 @@ fun OnlineSearchScreen(
                 val item = viewState.parsedUrlItem!!
                 YouTubeListItem(
                     item = item,
+                    downloadMetrics = downloadProgress[item.id],
                     isActive =
                         when (item) {
                             is SongItem -> mediaMetadata?.id == item.id
@@ -426,6 +429,7 @@ fun OnlineSearchScreen(
         items(viewState.items, key = { "item_${it.id}" }) { item ->
             YouTubeListItem(
                 item = item,
+                downloadMetrics = downloadProgress[item.id],
                 isActive =
                     when (item) {
                         is SongItem -> mediaMetadata?.id == item.id

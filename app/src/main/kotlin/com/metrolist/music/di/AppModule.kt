@@ -17,6 +17,7 @@ import com.metrolist.music.db.InternalDatabase
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.listentogether.ListenTogetherClient
 import com.metrolist.music.listentogether.ListenTogetherManager
+import com.metrolist.music.playback.DownloadUtil
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import dagger.Module
@@ -107,4 +108,20 @@ object AppModule {
         @ApplicationContext context: Context,
         client: ListenTogetherClient,
     ): ListenTogetherManager = ListenTogetherManager(client, context)
+
+    @Singleton
+    @Provides
+    fun provideDownloadUtil(
+        @ApplicationContext context: Context,
+        database: MusicDatabase,
+        databaseProvider: DatabaseProvider,
+        @DownloadCache downloadCache: Cache,
+        @PlayerCache playerCache: Cache,
+    ): DownloadUtil = DownloadUtil(
+        context = context,
+        database = database,
+        databaseProvider = databaseProvider,
+        downloadCache = downloadCache,
+        playerCache = playerCache,
+    )
 }

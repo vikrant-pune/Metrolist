@@ -47,6 +47,7 @@ class ExoDownloadService : DownloadService(
         downloads: MutableList<Download>,
         notMetRequirements: Int
     ): Notification {
+        downloadUtil.updateDownloadsProgress(downloads)
         val progressNotification =
             downloadUtil.downloadNotificationHelper.buildProgressNotification(
                 this,

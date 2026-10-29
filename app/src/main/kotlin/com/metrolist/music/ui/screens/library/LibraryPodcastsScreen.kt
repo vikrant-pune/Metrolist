@@ -62,6 +62,7 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import coil3.compose.AsyncImage
 import com.metrolist.music.LocalDatabase
+import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.LocalSyncUtils
@@ -108,6 +109,7 @@ fun LibraryPodcastsScreen(
     val playerConnection = LocalPlayerConnection.current ?: return
     val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
     val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
+    val downloadProgress by LocalDownloadUtil.current.downloadProgress.collectAsStateWithLifecycle()
 
     var podcastFilter by rememberEnumPreference(PodcastFilterKey, PodcastFilter.EPISODES)
 
@@ -407,6 +409,7 @@ fun LibraryPodcastsScreen(
                             isPlaying = isPlaying,
                             showLikedIcon = false,
                             showDownloadIcon = true,
+                            downloadMetrics = downloadProgress[episode.id],
                             subtitleOverride = subtitle.ifEmpty { null },
                             trailingContent = {
                                 IconButton(
