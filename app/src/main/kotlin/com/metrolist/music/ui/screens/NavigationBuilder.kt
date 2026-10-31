@@ -42,6 +42,7 @@ import com.metrolist.music.ui.screens.recognition.RecognitionHistoryScreen
 import com.metrolist.music.ui.screens.recognition.RecognitionScreen
 import com.metrolist.music.ui.screens.search.OnlineSearchResult
 import com.metrolist.music.ui.screens.search.SearchScreen
+import com.metrolist.music.utils.SearchRoutes
 import com.metrolist.music.ui.screens.settings.AboutScreen
 import com.metrolist.music.ui.screens.settings.AiSettings
 import com.metrolist.music.ui.screens.settings.AndroidAutoSettings
@@ -149,11 +150,16 @@ fun NavGraphBuilder.navigationBuilder(
     }
 
     composable(
-        route = "search/{query}",
+        route = SearchRoutes.ROUTE,
         arguments =
             listOf(
                 navArgument("query") {
                     type = NavType.StringType
+                },
+                navArgument("source") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
                 },
             ),
         enterTransition = {

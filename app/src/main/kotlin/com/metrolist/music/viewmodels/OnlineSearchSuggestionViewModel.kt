@@ -10,10 +10,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.AlbumItem
+import com.metrolist.innertube.models.Artist
 import com.metrolist.innertube.models.ArtistItem
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
+import com.metrolist.innertube.models.YouTubeClient
 import com.metrolist.innertube.models.YTItem
 import com.metrolist.innertube.models.filterExplicit
 import com.metrolist.innertube.models.filterVideoSongs
@@ -111,12 +113,44 @@ class OnlineSearchSuggestionViewModel
         private suspend fun fetchParsedUrlItem(parsedUrl: YouTubeUrlParser.ParsedUrl): YTItem? =
             when (parsedUrl) {
                 is YouTubeUrlParser.ParsedUrl.Video -> {
-                    // Use next() to get the song details from a video ID
-                    YouTube
-                        .next(WatchEndpoint(videoId = parsedUrl.id))
-                        .getOrNull()
-                        ?.items
-                        ?.firstOrNull()
+                    // Try next() first from YouTube Music
+                    val itemFromNext =
+                        YouTube
+                            .next(WatchEndpoint(videoId = parsedUrl.id))
+                            .getOrNull()
+                            ?.items
+                            ?.firstOrNull()
+
+                    if (itemFromNext != null) {
+                        itemFromNext
+                    } else {
+                        // Fall back to player API with WEB client (works for all YouTube videos including Shorts)
+                        val videoDetails =
+                            YouTube
+                                .player(videoId = parsedUrl.id, client = YouTubeClient.WEB)
+                                .getOrNull()
+                                ?.videoDetails
+
+                        if (videoDetails != null) {
+                            SongItem(
+                                id = videoDetails.videoId,
+                                title = videoDetails.title ?: "Unknown",
+                                artists = listOfNotNull(videoDetails.author?.let { Artist(it, videoDetails.channelId) }),
+                                album = null,
+                                duration = videoDetails.lengthSeconds.toIntOrNull(),
+                                thumbnail =
+                                    videoDetails.thumbnail.thumbnails.lastOrNull()?.url
+                                        ?: "https://i.ytimg.com/vi/${videoDetails.videoId}/hqdefault.jpg",
+                            )
+                        } else {
+                            // Fall back to searching for video ID
+                            YouTube
+                                .search(parsedUrl.id, YouTube.SearchFilter.FILTER_VIDEO)
+                                .getOrNull()
+                                ?.items
+                                ?.firstOrNull()
+                        }
+                    }
                 }
 
                 is YouTubeUrlParser.ParsedUrl.Playlist -> {

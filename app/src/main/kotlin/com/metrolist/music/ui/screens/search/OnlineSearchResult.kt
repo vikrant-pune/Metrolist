@@ -93,6 +93,7 @@ import com.metrolist.music.constants.MiniPlayerBottomSpacing
 import com.metrolist.music.constants.MiniPlayerHeight
 import com.metrolist.music.constants.NavigationBarHeight
 import com.metrolist.music.constants.PauseSearchHistoryKey
+import com.metrolist.music.constants.SearchSource
 import com.metrolist.music.db.entities.SearchHistory
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.toMediaMetadata
@@ -176,13 +177,13 @@ fun OnlineSearchResult(
     }
 
     val onSearch: (String) -> Unit =
-        remember {
+        remember(viewModel.searchSource) {
             { searchQuery ->
                 if (searchQuery.isNotEmpty()) {
                     isSearchFocused = false
                     focusManager.clearFocus()
 
-                    navController.navigate(SearchRoutes.resultRoute(searchQuery)) {
+                    navController.navigate(SearchRoutes.resultRoute(searchQuery, viewModel.searchSource)) {
                         popUpTo(SearchRoutes.ROUTE) {
                             inclusive = true
                         }
@@ -206,7 +207,7 @@ fun OnlineSearchResult(
 
     // Clear video filter if hideVideoSongs setting is enabled and filter is set to FILTER_VIDEO
     LaunchedEffect(hideVideoSongs) {
-        if (hideVideoSongs && viewModel.filter.value == FILTER_VIDEO) {
+        if (hideVideoSongs && viewModel.filter.value == FILTER_VIDEO && viewModel.searchSource != SearchSource.YOUTUBE) {
             viewModel.filter.value = null
         }
     }
@@ -376,7 +377,14 @@ fun OnlineSearchResult(
             },
             placeholder = {
                 Text(
-                    text = stringResource(R.string.search_yt_music),
+                    text =
+                        stringResource(
+                            if (viewModel.searchSource == SearchSource.YOUTUBE) {
+                                R.string.search_youtube
+                            } else {
+                                R.string.search_yt_music
+                            },
+                        ),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -458,7 +466,7 @@ fun OnlineSearchResult(
                         null to stringResource(R.string.filter_all),
                         FILTER_SONG to stringResource(R.string.filter_songs),
                     ).let { baseChips ->
-                        if (!hideVideoSongs) {
+                        if (!hideVideoSongs || viewModel.searchSource == SearchSource.YOUTUBE) {
                             baseChips + (FILTER_VIDEO to stringResource(R.string.filter_videos))
                         } else {
                             baseChips

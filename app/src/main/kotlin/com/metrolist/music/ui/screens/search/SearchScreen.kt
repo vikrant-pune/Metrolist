@@ -139,11 +139,15 @@ fun SearchScreen(
 
         when (val parsedUrl = YouTubeUrlParser.parse(searchQuery)) {
             is YouTubeUrlParser.ParsedUrl.Video -> {
-                playerConnection?.playQueue(
-                    YouTubeQueue(
-                        WatchEndpoint(videoId = parsedUrl.id),
-                    ),
-                )
+                if (searchSource == SearchSource.YOUTUBE) {
+                    navController.navigate(SearchRoutes.resultRoute(parsedUrl.id, searchSource))
+                } else {
+                    playerConnection?.playQueue(
+                        YouTubeQueue(
+                            WatchEndpoint(videoId = parsedUrl.id),
+                        ),
+                    )
+                }
             }
 
             is YouTubeUrlParser.ParsedUrl.Playlist -> {
@@ -159,7 +163,7 @@ fun SearchScreen(
             }
 
             null -> {
-                navController.navigate(SearchRoutes.resultRoute(searchQuery))
+                navController.navigate(SearchRoutes.resultRoute(searchQuery, searchSource))
             }
         }
 
@@ -206,6 +210,7 @@ fun SearchScreen(
                                                 when (searchSource) {
                                                     SearchSource.LOCAL -> R.string.search_library
                                                     SearchSource.ONLINE -> R.string.search_yt_music
+                                                    SearchSource.YOUTUBE -> R.string.search_youtube
                                                 },
                                             ),
                                         style =
@@ -239,12 +244,7 @@ fun SearchScreen(
                             }
                             IconButton(
                                 onClick = {
-                                    searchSource =
-                                        if (searchSource == SearchSource.ONLINE) {
-                                            SearchSource.LOCAL
-                                        } else {
-                                            SearchSource.ONLINE
-                                        }
+                                    searchSource = searchSource.toggle()
                                 },
                             ) {
                                 Icon(
@@ -253,6 +253,7 @@ fun SearchScreen(
                                             when (searchSource) {
                                                 SearchSource.LOCAL -> R.drawable.library_music
                                                 SearchSource.ONLINE -> R.drawable.language
+                                                SearchSource.YOUTUBE -> R.drawable.youtube
                                             },
                                         ),
                                     contentDescription = null,
@@ -294,7 +295,8 @@ fun SearchScreen(
                     )
                 }
 
-                SearchSource.ONLINE -> {
+                SearchSource.ONLINE,
+                SearchSource.YOUTUBE -> {
                     OnlineSearchScreen(
                         query = query.text,
                         onQueryChange = { query = it },

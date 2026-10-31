@@ -20,10 +20,12 @@ import com.metrolist.innertube.models.filterExplicit
 import com.metrolist.innertube.models.filterVideoSongs
 import com.metrolist.innertube.models.filterYoutubeShorts
 import com.metrolist.innertube.pages.SearchSummaryPage
+import com.metrolist.innertube.utils.YouTubeUrlParser
 import com.metrolist.music.constants.HideExplicitKey
 import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.HideYoutubeShortsKey
 import com.metrolist.music.constants.PauseSearchHistoryKey
+import com.metrolist.music.constants.SearchSource
 import com.metrolist.music.models.ItemsPage
 import com.metrolist.music.utils.SearchRoutes
 import com.metrolist.music.utils.dataStore
@@ -44,8 +46,14 @@ constructor(
     @ApplicationContext val context: Context,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
-    val query = SearchRoutes.decodeQuery(savedStateHandle.get<String>("query").orEmpty())
-    val filter = MutableStateFlow<YouTube.SearchFilter?>(null)
+    val rawQuery = SearchRoutes.decodeQuery(savedStateHandle.get<String>("query").orEmpty())
+    val query = YouTubeUrlParser.parse(rawQuery)?.id ?: rawQuery
+    val searchSource = savedStateHandle.get<String>("source")?.let {
+        runCatching { SearchSource.valueOf(it) }.getOrNull()
+    } ?: SearchSource.ONLINE
+    val filter = MutableStateFlow<YouTube.SearchFilter?>(
+        if (searchSource == SearchSource.YOUTUBE) YouTube.SearchFilter.FILTER_VIDEO else null
+    )
     var summaryPage by mutableStateOf<SearchSummaryPage?>(null)
     val viewStateMap = mutableStateMapOf<String, ItemsPage?>()
 
@@ -102,7 +110,7 @@ constructor(
                         }
                     val resolvedPage = page.copy(summaries = resolvedSummaries)
                     val hideExplicit = context.dataStore.get(HideExplicitKey, false)
-                    val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
+                    val hideVideoSongs = if (searchSource == SearchSource.YOUTUBE) false else context.dataStore.get(HideVideoSongsKey, false)
                     val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
                     summaryPage =
                         resolvedPage
@@ -144,7 +152,7 @@ constructor(
                             .onSuccess { result ->
                                 val resolvedItems = resolveSearchMetadata(result.items)
                                 val hideExplicit = context.dataStore.get(HideExplicitKey, false)
-                                val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
+                                val hideVideoSongs = if (searchSource == SearchSource.YOUTUBE) false else context.dataStore.get(HideVideoSongsKey, false)
                                 val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
                                 viewStateMap[filter.value] =
                                     ItemsPage(
@@ -177,7 +185,7 @@ constructor(
                 ).getOrNull() ?: return@launch
             val resolvedItems = resolveSearchMetadata(searchResult.items)
             val hideExplicit = context.dataStore.get(HideExplicitKey, false)
-            val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
+            val hideVideoSongs = if (searchSource == SearchSource.YOUTUBE) false else context.dataStore.get(HideVideoSongsKey, false)
             val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
             val newItems = resolvedItems
                 .filterExplicit(hideExplicit)

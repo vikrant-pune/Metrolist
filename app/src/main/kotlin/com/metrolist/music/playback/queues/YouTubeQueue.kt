@@ -8,6 +8,7 @@ package com.metrolist.music.playback.queues
 import androidx.media3.common.MediaItem
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.WatchEndpoint
+import com.metrolist.innertube.models.YouTubeClient
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.MediaMetadata
 import kotlinx.coroutines.Dispatchers.IO
@@ -67,15 +68,48 @@ class YouTubeQueue(
                     )
                 } catch (e: Exception) {
                     lastException = e
-                    if (
-                        e is EmptyRadioQueueException &&
-                        endpoint.playlistId?.startsWith("RDAMVM") == true &&
-                        endpoint.videoId != null
-                    ) {
+                    if (endpoint.playlistId?.startsWith("RDAMVM") == true && endpoint.videoId != null) {
                         endpoint = WatchEndpoint(videoId = endpoint.videoId)
                         // It will loop again and try with just videoId
                     }
                 }
+            }
+
+            // Fallback for standalone videos / YouTube Shorts where next() returns no queue
+            val videoId = endpoint.videoId
+            if (videoId != null) {
+                if (preloadItem != null) {
+                    return@withContext Queue.Status(
+                        title = preloadItem.title,
+                        items = listOf(preloadItem.toMediaItem()),
+                        mediaItemIndex = 0,
+                    )
+                }
+                val details =
+                    YouTube
+                        .player(videoId = videoId, client = YouTubeClient.WEB)
+                        .getOrNull()
+                        ?.videoDetails
+                val item =
+                    details?.let {
+                        MediaMetadata(
+                            id = it.videoId,
+                            title = it.title ?: "Unknown",
+                            artists =
+                                listOfNotNull(
+                                    it.author?.let { author ->
+                                        MediaMetadata.Artist(id = it.channelId, name = author)
+                                    },
+                                ),
+                            duration = it.lengthSeconds.toIntOrNull() ?: 0,
+                            thumbnailUrl = it.thumbnail.thumbnails.lastOrNull()?.url,
+                        ).toMediaItem()
+                    } ?: MediaItem.Builder().setMediaId(videoId).build()
+                return@withContext Queue.Status(
+                    title = details?.title,
+                    items = listOf(item),
+                    mediaItemIndex = 0,
+                )
             }
             throw lastException ?: Exception("Failed to get initial status")
         }

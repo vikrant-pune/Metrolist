@@ -507,12 +507,14 @@ val SleepTimerDayTimesKey = stringPreferencesKey("sleepTimerDayTimes")
 enum class SearchSource {
     LOCAL,
     ONLINE,
+    YOUTUBE,
     ;
 
     fun toggle() =
         when (this) {
+            ONLINE -> YOUTUBE
+            YOUTUBE -> LOCAL
             LOCAL -> ONLINE
-            ONLINE -> LOCAL
         }
 }
 
