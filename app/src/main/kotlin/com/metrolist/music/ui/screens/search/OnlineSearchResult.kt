@@ -214,10 +214,14 @@ fun OnlineSearchResult(
 
     val searchFilter by viewModel.filter.collectAsStateWithLifecycle()
     val searchSummary = viewModel.summaryPage
-    val itemsPage by remember(searchFilter) {
+    val itemsPage by remember(searchFilter, viewModel.searchSource) {
         derivedStateOf {
-            searchFilter?.value?.let {
-                viewModel.viewStateMap[it]
+            if (viewModel.searchSource == SearchSource.YOUTUBE) {
+                viewModel.viewStateMap[OnlineSearchViewModel.YOUTUBE_KEY]
+            } else {
+                searchFilter?.value?.let {
+                    viewModel.viewStateMap[it]
+                }
             }
         }
     }
@@ -461,46 +465,73 @@ fun OnlineSearchResult(
             Column(
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                val visibleChips =
-                    listOf(
-                        null to stringResource(R.string.filter_all),
-                        FILTER_SONG to stringResource(R.string.filter_songs),
-                    ).let { baseChips ->
-                        if (!hideVideoSongs || viewModel.searchSource == SearchSource.YOUTUBE) {
-                            baseChips + (FILTER_VIDEO to stringResource(R.string.filter_videos))
-                        } else {
-                            baseChips
-                        }
-                    } +
+                if (viewModel.searchSource != SearchSource.YOUTUBE) {
+                    val visibleChips =
                         listOf(
-                            FILTER_ALBUM to stringResource(R.string.filter_albums),
-                            FILTER_ARTIST to stringResource(R.string.filter_artists),
-                            FILTER_COMMUNITY_PLAYLIST to stringResource(R.string.filter_community_playlists),
-                            FILTER_FEATURED_PLAYLIST to stringResource(R.string.filter_featured_playlists),
-                            FILTER_PODCAST to stringResource(R.string.filter_podcasts),
-                            FILTER_EPISODE to stringResource(R.string.filter_episodes),
-                            FILTER_PROFILE to stringResource(R.string.filter_profiles),
-                        )
+                            null to stringResource(R.string.filter_all),
+                            FILTER_SONG to stringResource(R.string.filter_songs),
+                        ).let { baseChips ->
+                            if (!hideVideoSongs) {
+                                baseChips + (FILTER_VIDEO to stringResource(R.string.filter_videos))
+                            } else {
+                                baseChips
+                            }
+                        } +
+                            listOf(
+                                FILTER_ALBUM to stringResource(R.string.filter_albums),
+                                FILTER_ARTIST to stringResource(R.string.filter_artists),
+                                FILTER_COMMUNITY_PLAYLIST to stringResource(R.string.filter_community_playlists),
+                                FILTER_FEATURED_PLAYLIST to stringResource(R.string.filter_featured_playlists),
+                                FILTER_PODCAST to stringResource(R.string.filter_podcasts),
+                                FILTER_EPISODE to stringResource(R.string.filter_episodes),
+                                FILTER_PROFILE to stringResource(R.string.filter_profiles),
+                            )
 
-                ChipsRow(
-                    chips = visibleChips,
-                    currentValue = searchFilter,
-                    onValueUpdate = {
-                        if (viewModel.filter.value != it) {
-                            viewModel.filter.value = it
-                        }
-                        coroutineScope.launch {
-                            lazyListState.animateScrollToItem(0)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                    ChipsRow(
+                        chips = visibleChips,
+                        currentValue = searchFilter,
+                        onValueUpdate = {
+                            if (viewModel.filter.value != it) {
+                                viewModel.filter.value = it
+                            }
+                            coroutineScope.launch {
+                                lazyListState.animateScrollToItem(0)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
 
                 LazyColumn(
                     state = lazyListState,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    if (searchFilter == null) {
+                    if (viewModel.searchSource == SearchSource.YOUTUBE) {
+                        items(
+                            items = itemsPage?.items.orEmpty().distinctBy { it.id },
+                            key = { "youtube_${it.id}" },
+                            itemContent = ytItemContent,
+                        )
+
+                        if (itemsPage?.continuation != null) {
+                            item(key = "loading") {
+                                ShimmerHost {
+                                    repeat(3) {
+                                        ListItemPlaceHolder()
+                                    }
+                                }
+                            }
+                        }
+
+                        if (itemsPage != null && itemsPage?.items?.isEmpty() == true) {
+                            item {
+                                EmptyPlaceholder(
+                                    icon = R.drawable.search,
+                                    text = stringResource(R.string.no_results_found),
+                                )
+                            }
+                        }
+                    } else if (searchFilter == null) {
                         searchSummary?.summaries?.forEach { summary ->
                             item {
                                 NavigationTitle(summary.title.toLocalizedSearchSection())

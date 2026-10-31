@@ -43,6 +43,7 @@ import com.metrolist.innertube.models.response.GetTranscriptResponse
 import com.metrolist.innertube.models.response.NextResponse
 import com.metrolist.innertube.models.response.PlayerResponse
 import com.metrolist.innertube.models.response.SearchResponse
+import com.metrolist.innertube.models.response.WebSearchResponse
 import com.metrolist.innertube.pages.AlbumPage
 import com.metrolist.innertube.pages.ArtistItemsContinuationPage
 import com.metrolist.innertube.pages.ArtistItemsPage
@@ -380,6 +381,23 @@ object YouTube {
                             ?.getContinuation()
                     },
             )
+        }
+
+    suspend fun searchWeb(
+        query: String,
+        continuation: String? = null,
+        recordSearchHistory: Boolean = false,
+    ): Result<SearchResult> =
+        runCatching {
+            val response =
+                innerTube
+                    .search(
+                        client = YouTubeClient.WEB,
+                        query = query.takeIf { continuation == null },
+                        continuation = continuation,
+                        setLogin = recordSearchHistory,
+                    ).body<WebSearchResponse>()
+            response.toSearchResult()
         }
 
     suspend fun album(
