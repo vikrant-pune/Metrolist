@@ -24,6 +24,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.audiofx.AudioEffect
+import android.media.audiofx.LoudnessEnhancer
 import com.metrolist.music.playback.audio.VolumeNormalizationAudioProcessor
 import com.metrolist.music.utils.safeDataStoreEdit
 import android.net.ConnectivityManager
@@ -427,6 +428,7 @@ class MusicService :
 
     private var isAudioEffectSessionOpened = false
     private var openedAudioEffectSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+    private var loudnessEnhancer: LoudnessEnhancer? = null
     private val historyReporters = HashMap<Player, YouTubeHistoryReporter>()
     private val playerNormalizationProcessors = HashMap<Player, VolumeNormalizationAudioProcessor>()
     private val playerEqualizerProcessors = HashMap<Player, CustomEqualizerAudioProcessor>()
@@ -1311,6 +1313,14 @@ class MusicService :
             }
         }
 
+        val audioAttributes =
+            AudioAttributes
+                .Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setSpatializationBehavior(C.SPATIALIZATION_BEHAVIOR_NEVER)
+                .build()
+
         var createdPlayer: ExoPlayer? = null
         val player =
             ExoPlayer
@@ -1330,18 +1340,13 @@ class MusicService :
                 )
                 .setHandleAudioBecomingNoisy(true)
                 .setWakeMode(C.WAKE_MODE_NETWORK)
-                .setAudioAttributes(
-                    AudioAttributes
-                        .Builder()
-                        .setUsage(C.USAGE_MEDIA)
-                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                        .build(),
-                    false,
-                ).setSeekBackIncrementMs(5000)
+                .setAudioAttributes(audioAttributes, false)
+                .setSeekBackIncrementMs(5000)
                 .setSeekForwardIncrementMs(5000)
                 .setDeviceVolumeControlEnabled(true)
                 .build()
         createdPlayer = player
+        player.setAudioAttributes(audioAttributes, false)
 
         playerNormalizationProcessors[player] = normalizationProcessor
         playerSilenceProcessors[player] = silenceProcessor
@@ -2431,11 +2436,36 @@ class MusicService :
         }
     }
 
+    private fun updateLoudnessEnhancer(isEpisode: Boolean) {
+        if (!isEpisode) {
+            try {
+                loudnessEnhancer?.enabled = false
+            } catch (e: Exception) {
+                reportException(e)
+            }
+            return
+        }
+        val audioSessionId = player.audioSessionId
+        if (audioSessionId != C.AUDIO_SESSION_ID_UNSET && audioSessionId > 0) {
+            try {
+                if (loudnessEnhancer == null) {
+                    loudnessEnhancer = LoudnessEnhancer(audioSessionId)
+                }
+                loudnessEnhancer?.enabled = true
+            } catch (e: Exception) {
+                reportException(e)
+            }
+        }
+    }
+
     private fun openAudioEffectSession() {
         val audioSessionId = player.audioSessionId
         if (audioSessionId == C.AUDIO_SESSION_ID_UNSET || audioSessionId <= 0) {
             return
         }
+
+        val isEpisode = player.currentMediaItem?.metadata?.isEpisode == true
+        updateLoudnessEnhancer(isEpisode)
 
         if (isAudioEffectSessionOpened && openedAudioEffectSessionId == audioSessionId) {
             return
@@ -2471,7 +2501,12 @@ class MusicService :
                     sessionIdToClose == openedAudioEffectSessionId
 
         if (isClosingCurrentSession) {
-
+            try {
+                loudnessEnhancer?.release()
+            } catch (e: Exception) {
+                reportException(e)
+            }
+            loudnessEnhancer = null
             isAudioEffectSessionOpened = false
             openedAudioEffectSessionId = C.AUDIO_SESSION_ID_UNSET
         }
@@ -2564,6 +2599,9 @@ class MusicService :
                 delay(100)
                 restoreEpisodePosition(newMetadata.id)
             }
+            updateLoudnessEnhancer(isEpisode = true)
+        } else {
+            loudnessEnhancer?.enabled = false
         }
 
         // Force Repeat One if the player ignored it and auto-advanced
