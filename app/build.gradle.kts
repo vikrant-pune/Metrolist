@@ -273,6 +273,7 @@ dependencies {
     implementation(libs.materialKolor)
 
     implementation(libs.appcompat)
+    implementation(libs.work.runtime.ktx)
 
     implementation(libs.coil)
     implementation(libs.coil.network.okhttp)

@@ -31,7 +31,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.media3.exoplayer.offline.Download
+import com.metrolist.music.LocalDownloadUtil
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -189,46 +192,92 @@ fun OnlinePodcastScreen(
                         items = filteredEpisodes,
                         key = { _, episode -> episode.id }
                     ) { index, episode ->
-                        YouTubeListItem(
-                            item = episode,
-                            isActive = mediaMetadata?.id == episode.id,
-                            isPlaying = isPlaying,
-                            modifier = Modifier
-                                .combinedClickable(
-                                    onClick = {
-                                        if (episode.id == mediaMetadata?.id) {
-                                            playerConnection.togglePlayPause()
-                                        } else {
-                                            Timber.d("Playing episode: ${episode.title}, index: $index, total episodes: ${filteredEpisodes.size}")
-                                            val mediaItems = filteredEpisodes.map { it.toMediaMetadata().toMediaItem() }
-                                            Timber.d("Created ${mediaItems.size} media items for queue")
-                                            playerConnection.playQueue(
-                                                ListQueue(
-                                                    title = podcast?.title,
-                                                    items = mediaItems,
-                                                    startIndex = index
+                        val downloadUtil = LocalDownloadUtil.current
+                        val progressInfo by downloadUtil.getProgress(episode.id).collectAsStateWithLifecycle(null)
+                        val download by downloadUtil.getDownload(episode.id).collectAsStateWithLifecycle(null)
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            YouTubeListItem(
+                                item = episode,
+                                isActive = mediaMetadata?.id == episode.id,
+                                isPlaying = isPlaying,
+                                modifier = Modifier
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (episode.id == mediaMetadata?.id) {
+                                                playerConnection.togglePlayPause()
+                                            } else {
+                                                Timber.d("Playing episode: ${episode.title}, index: $index, total episodes: ${filteredEpisodes.size}")
+                                                val mediaItems = filteredEpisodes.map { it.toMediaMetadata().toMediaItem() }
+                                                Timber.d("Created ${mediaItems.size} media items for queue")
+                                                playerConnection.playQueue(
+                                                    ListQueue(
+                                                        title = podcast?.title,
+                                                        items = mediaItems,
+                                                        startIndex = index
+                                                    )
                                                 )
-                                            )
+                                            }
+                                        },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            menuState.show {
+                                                YouTubeSongMenu(episode.asSongItem(), menuState::dismiss)
+                                            }
                                         }
-                                    },
-                                    onLongClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    )
+                                    .animateItem(),
+                                trailingContent = {
+                                    IconButton(onClick = {
                                         menuState.show {
                                             YouTubeSongMenu(episode.asSongItem(), menuState::dismiss)
                                         }
+                                    }) {
+                                        Icon(painterResource(R.drawable.more_vert), null)
                                     }
-                                )
-                                .animateItem(),
-                            trailingContent = {
-                                IconButton(onClick = {
-                                    menuState.show {
-                                        YouTubeSongMenu(episode.asSongItem(), menuState::dismiss)
+                                }
+                            )
+
+                            if (download?.state == Download.STATE_DOWNLOADING) {
+                                val currentPercent = progressInfo?.percent
+                                    ?: download?.percentDownloaded?.toInt()?.coerceIn(0, 100)
+                                    ?: 0
+                                val currentEta = progressInfo?.etaFormatted ?: stringResource(R.string.downloading)
+                                val currentSpeed = progressInfo?.speedFormatted.orEmpty()
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 72.dp, end = 16.dp, bottom = 6.dp)
+                                ) {
+                                    LinearProgressIndicator(
+                                        progress = { currentPercent / 100f },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(3.dp)
+                                            .clip(RoundedCornerShape(1.5.dp)),
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(
+                                            text = "$currentPercent% • ETA: $currentEta",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        if (currentSpeed.isNotBlank()) {
+                                            Text(
+                                                text = currentSpeed,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.secondary,
+                                            )
+                                        }
                                     }
-                                }) {
-                                    Icon(painterResource(R.drawable.more_vert), null)
                                 }
                             }
-                        )
+                        }
                     }
                 }
             }

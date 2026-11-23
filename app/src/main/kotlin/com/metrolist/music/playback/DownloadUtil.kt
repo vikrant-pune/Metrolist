@@ -48,6 +48,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -92,6 +93,7 @@ constructor(
     private val downloadPreparations = Semaphore(3)
 
     val downloads = MutableStateFlow<Map<String, Download>>(emptyMap())
+    val podcastProgress = MutableStateFlow<Map<String, DownloadProgressInfo>>(emptyMap())
 
     private val dataSourceFactory =
         ResolvingDataSource.Factory(
@@ -314,9 +316,26 @@ constructor(
                 .filter { it.state == Download.STATE_COMPLETED }
                 .forEach { removeFromPlayerCache(it.request.id) }
         }
+        scope.launch {
+            database.downloadedPodcastEpisodesByCreateDateAsc().first().forEach { ep ->
+                val request = DownloadRequest.Builder(ep.id, ep.id.toUri()).build()
+                val download = Download(
+                    request,
+                    Download.STATE_COMPLETED,
+                    System.currentTimeMillis(),
+                    System.currentTimeMillis(),
+                    0L,
+                    0,
+                    0,
+                )
+                downloads.update { it + (ep.id to download) }
+            }
+        }
     }
 
     fun getDownload(songId: String): Flow<Download?> = downloads.map { it[songId] }
+
+    fun getProgress(songId: String): Flow<DownloadProgressInfo?> = podcastProgress.map { it[songId] }
 
     fun download(song: Song) = download(song.toMediaMetadata())
 
@@ -351,6 +370,42 @@ constructor(
                         overwriteTitle = false,
                         overwriteArtists = false,
                     )
+                }
+
+                val isEpisode = mediaMetadata.isEpisode ||
+                    database.songEntity(mediaMetadata.id)?.isEpisode == true ||
+                    (mediaMetadata.album?.id != null && !mediaMetadata.album.id.startsWith("MPREb_"))
+                if (isEpisode) {
+                    val currentSong = database.getSongByIdBlocking(mediaMetadata.id)?.song
+                    if (currentSong?.isDownloaded == true && currentSong.localPath != null) {
+                        return@withPermit
+                    }
+                    if (currentSong != null && !currentSong.isEpisode) {
+                        database.query {
+                            update(currentSong.copy(isEpisode = true))
+                        }
+                    }
+                    PodcastDownloadWorker.enqueue(
+                        context = context,
+                        episodeId = mediaMetadata.id,
+                        episodeTitle = mediaMetadata.title,
+                    )
+
+                    val albumArtwork = database.getSongByIdBlocking(mediaMetadata.id)?.album?.thumbnailUrl
+                    downloadArtworkUrls(mediaMetadata.thumbnailUrl, albumArtwork).forEach { artworkUrl ->
+                        runCatching {
+                            context.imageLoader.execute(
+                                ImageRequest
+                                    .Builder(context)
+                                    .data(artworkUrl)
+                                    .memoryCachePolicy(CachePolicy.DISABLED)
+                                    .diskCachePolicy(CachePolicy.ENABLED)
+                                    .networkCachePolicy(CachePolicy.ENABLED)
+                                    .build(),
+                            )
+                        }
+                    }
+                    return@withPermit
                 }
 
                 if (!shouldPrepareDownload(downloadManager.downloadIndex.getDownload(mediaMetadata.id)?.state)) {
@@ -392,6 +447,82 @@ constructor(
         scope.launch {
             database.getSongByIdBlocking(songId)?.let { song ->
                 download(song)
+            }
+        }
+    }
+
+    fun updatePodcastDownloadState(
+        songId: String,
+        state: Int,
+        contentLength: Long = 0L,
+        bytesDownloaded: Long = 0L,
+        speedFormatted: String? = null,
+        etaFormatted: String? = null,
+    ) {
+        if (state == Download.STATE_STOPPED || state == Download.STATE_FAILED || state == Download.STATE_COMPLETED) {
+            podcastProgress.update { it - songId }
+        } else if (contentLength > 0L && speedFormatted != null && etaFormatted != null) {
+            val percent = ((bytesDownloaded.toDouble() / contentLength) * 100).toInt().coerceIn(0, 100)
+            podcastProgress.update {
+                it + (songId to DownloadProgressInfo(
+                    songId = songId,
+                    bytesDownloaded = bytesDownloaded,
+                    totalBytes = contentLength,
+                    percent = percent,
+                    speedFormatted = speedFormatted,
+                    etaFormatted = etaFormatted,
+                ))
+            }
+        }
+
+        if (state == Download.STATE_STOPPED || state == Download.STATE_FAILED) {
+            downloads.update { it - songId }
+        } else {
+            val request = DownloadRequest.Builder(songId, songId.toUri()).build()
+            val progress = androidx.media3.exoplayer.offline.DownloadProgress().apply {
+                this.bytesDownloaded = if (state == Download.STATE_COMPLETED && contentLength > 0) contentLength else bytesDownloaded
+                this.percentDownloaded = if (contentLength > 0) {
+                    ((this.bytesDownloaded.toFloat() / contentLength) * 100f).coerceIn(0f, 100f)
+                } else if (state == Download.STATE_COMPLETED) {
+                    100f
+                } else {
+                    -1f
+                }
+            }
+            val download = Download(
+                request,
+                state,
+                System.currentTimeMillis(),
+                System.currentTimeMillis(),
+                contentLength,
+                0,
+                0,
+                progress,
+            )
+            downloads.update { it + (songId to download) }
+        }
+    }
+
+    fun removeDownload(songId: String) {
+        scope.launch {
+            val song = database.getSongByIdBlocking(songId)?.song
+            if (song?.isEpisode == true) {
+                androidx.work.WorkManager.getInstance(context).cancelUniqueWork("podcast_download_$songId")
+                val audioDir = java.io.File(context.filesDir, "audio")
+                val targetFile = java.io.File(audioDir, songId)
+                if (targetFile.exists()) {
+                    targetFile.delete()
+                }
+                database.updateEpisodeDownloadedInfo(songId, false, null, null)
+                podcastProgress.update { it - songId }
+                downloads.update { it - songId }
+            } else {
+                DownloadService.sendRemoveDownload(
+                    context,
+                    ExoDownloadService::class.java,
+                    songId,
+                    false,
+                )
             }
         }
     }
@@ -451,3 +582,12 @@ internal fun downloadContentLength(
 
 private val PARTIAL_CONTENT_RANGE = Regex("""bytes\s+0-0/(\d+)""", RegexOption.IGNORE_CASE)
 private val UNSATISFIED_CONTENT_RANGE = Regex("""bytes\s+\*/(\d+)""", RegexOption.IGNORE_CASE)
+
+data class DownloadProgressInfo(
+    val songId: String,
+    val bytesDownloaded: Long,
+    val totalBytes: Long,
+    val percent: Int,
+    val speedFormatted: String,
+    val etaFormatted: String,
+)

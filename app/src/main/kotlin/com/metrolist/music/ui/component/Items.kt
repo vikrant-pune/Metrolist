@@ -1145,7 +1145,7 @@ fun YouTubeListItem(
         // if (item is SongItem && song?.song?.inLibrary != null) {
         //     Icon.Library()
         // }
-        if (item is SongItem) {
+        if (item is SongItem || item is EpisodeItem) {
             val download by LocalDownloadUtil.current.getDownload(item.id).collectAsStateWithLifecycle(null)
             Icon.Download(download?.state)
         }
@@ -1250,7 +1250,7 @@ fun YouTubeGridItem(
         }
         if (item.explicit) Icon.Explicit()
         // if (item is SongItem && song?.song?.inLibrary != null) Icon.Library()
-        if (item is SongItem) {
+        if (item is SongItem || item is EpisodeItem) {
             val download by LocalDownloadUtil.current.getDownload(item.id).collectAsStateWithLifecycle(null)
             Icon.Download(download?.state)
         }

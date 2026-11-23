@@ -3862,6 +3862,19 @@ class MusicService :
             val shouldBypassCache = bypassCacheForQualityChange.contains(mediaId)
 
             if (!shouldBypassCache) {
+                val song = runBlocking(Dispatchers.IO) { database.songEntity(mediaId) }
+                val localPath = song?.localPath
+                if (localPath != null) {
+                    val localUri = localPath.toUri()
+                    if (localUri.scheme == "file") {
+                        val file = localUri.path?.let { java.io.File(it) }
+                        if (file != null && file.exists()) {
+                            recoverSongDeduped(mediaId)
+                            return@Factory dataSpec.withUri(localUri)
+                        }
+                    }
+                }
+
                 val usePlayerCache = dataStore.get(EnableSongCacheKey, true)
 
                 val contentLength =

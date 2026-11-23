@@ -99,6 +99,8 @@ fun QueueMenu(
     val librarySong by database.song(mediaMetadata.id).collectAsStateWithLifecycle(initialValue = null)
     val download by downloadUtil.getDownload(mediaMetadata.id)
         .collectAsStateWithLifecycle(initialValue = null)
+    val podcastProgress by downloadUtil.getProgress(mediaMetadata.id)
+        .collectAsStateWithLifecycle(initialValue = null)
 
     var refetchIconDegree by remember { mutableFloatStateOf(0f) }
     val rotationAnimation by animateFloatAsState(
@@ -412,19 +414,29 @@ fun QueueMenu(
                                     )
                                 },
                                 onClick = {
-                                    DownloadService.sendRemoveDownload(
-                                        context,
-                                        ExoDownloadService::class.java,
-                                        mediaMetadata.id,
-                                        false,
-                                    )
+                                    downloadUtil.removeDownload(mediaMetadata.id)
                                 }
                             )
                         }
 
                         Download.STATE_QUEUED, Download.STATE_DOWNLOADING -> {
+                            val percent = podcastProgress?.percent ?: download?.percentDownloaded?.toInt()?.takeIf { it in 0..100 }
+                            val eta = podcastProgress?.etaFormatted
+                            val speed = podcastProgress?.speedFormatted
+                            val titleText = when {
+                                percent != null && eta != null -> "${stringResource(R.string.downloading)} • $percent% (ETA: $eta)"
+                                percent != null -> "${stringResource(R.string.downloading)} • $percent%"
+                                else -> stringResource(R.string.downloading)
+                            }
                             Material3MenuItemData(
-                                title = { Text(text = stringResource(R.string.downloading)) },
+                                title = { Text(text = titleText) },
+                                description = speed?.let { sp ->
+                                    {
+                                        val downloadedMb = (podcastProgress?.bytesDownloaded ?: 0L) / (1024 * 1024.0)
+                                        val totalMb = (podcastProgress?.totalBytes ?: 0L) / (1024 * 1024.0)
+                                        Text(text = String.format(java.util.Locale.US, "%s • %.1f / %.1f MB", sp, downloadedMb, totalMb))
+                                    }
+                                },
                                 icon = {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(24.dp),
@@ -432,12 +444,7 @@ fun QueueMenu(
                                     )
                                 },
                                 onClick = {
-                                    DownloadService.sendRemoveDownload(
-                                        context,
-                                        ExoDownloadService::class.java,
-                                        mediaMetadata.id,
-                                        false,
-                                    )
+                                    downloadUtil.removeDownload(mediaMetadata.id)
                                 }
                             )
                         }
